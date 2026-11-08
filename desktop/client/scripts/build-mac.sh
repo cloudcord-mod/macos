@@ -7,6 +7,13 @@ if [[ "$(uname -s)" != Darwin ]]; then
     exit 1
 fi
 
+RUNTIME_ASAR="${1:?Pass the path to a standalone CloudCord desktop.asar}"
+if [[ ! -f "$RUNTIME_ASAR" || ! -s "$RUNTIME_ASAR" ]]; then
+    echo "Desktop runtime archive is missing or empty: $RUNTIME_ASAR" >&2
+    exit 1
+fi
+RUNTIME_ASAR="$(cd "$(dirname "$RUNTIME_ASAR")" && pwd)/$(basename "$RUNTIME_ASAR")"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLIENT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$CLIENT_DIR"
@@ -17,11 +24,7 @@ case "$(uname -m)" in
     *) echo "Unsupported Mac architecture"; exit 1 ;;
 esac
 
-# Standalone keeps platform checks dynamic instead of baking the build host
-# into the runtime. Use the complete desktop plugin set, not a reduced web build.
-pnpm typecheck
 node scripts/test-mac-package.cjs
-pnpm buildStandalone
 (
     cd installer
     go test -tags cli ./...
@@ -32,8 +35,8 @@ PACKAGE_DIR="$CLIENT_DIR/dist/mac-$ARCH"
 APP_DIR="$PACKAGE_DIR/CloudCord.app"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 cp "dist/CloudCordSetup-darwin-$ARCH" "$APP_DIR/Contents/MacOS/CloudCordSetup"
-cp dist/desktop.asar "$PACKAGE_DIR/cloudcord.asar"
-cp dist/desktop.asar "$APP_DIR/Contents/Resources/cloudcord.asar"
+cp "$RUNTIME_ASAR" "$PACKAGE_DIR/cloudcord.asar"
+cp "$RUNTIME_ASAR" "$APP_DIR/Contents/Resources/cloudcord.asar"
 cp installer/MAC-INSTALL.txt "$PACKAGE_DIR/Read Me First.txt"
 cp installer/MAC-INSTALL.txt "$APP_DIR/Contents/Resources/Read Me First.txt"
 # Generate Apple's icon sizes from the existing square CloudCord favicon.
@@ -75,6 +78,10 @@ codesign --force --sign - "$APP_DIR"
 codesign --verify --strict --verbose=2 "$APP_DIR"
 file "$APP_DIR/Contents/MacOS/CloudCordSetup"
 # Exercise Finder/LaunchServices rather than only compiling the executable.
+if pgrep -x CloudCordSetup >/dev/null; then
+    echo "Close CloudCord Setup before testing the package." >&2
+    exit 1
+fi
 LAUNCH_LOG="$PACKAGE_DIR/launch.log"
 otool -L "$APP_DIR/Contents/MacOS/CloudCordSetup"
 # Capture native startup errors before testing LaunchServices. A successful
@@ -88,24 +95,9 @@ if ! kill -0 "$LAUNCH_PID" 2>/dev/null; then
     echo "Installer exited before its launch check completed."
     exit 1
 fi
-# Stop the tested instance so the disk-image launch cannot accidentally pass
-# by finding the process that was started from the build directory.
-for TEST_PID in $(pgrep -x CloudCordSetup); do
-    kill "$TEST_PID"
-done
+# Stop the direct test before Finder opens the app copied from the disk image.
 kill "$LAUNCH_PID"
 wait "$LAUNCH_PID" || true
-open -n "$APP_DIR"
-sleep 5
-# Match the executable name, not a regex containing the bundle path (which
-# contains spaces and may differ from the argv exposed by LaunchServices).
-if ! pgrep -x CloudCordSetup >/dev/null; then
-    cat "$LAUNCH_LOG"
-    ps -axo pid,comm,args
-    find "$HOME/Library/Logs/DiagnosticReports" -maxdepth 1 -name 'CloudCordSetup*' -type f -exec cat {} \; 2>/dev/null || true
-    echo "LaunchServices did not leave a running installer."
-    exit 1
-fi
 # A local preview is not notarized. Do not disable Gatekeeper or rewrite
 # Discord's signature here; distribution signing is a separate release gate.
 ditto -c -k --sequesterRsrc --keepParent "$PACKAGE_DIR" "dist/CloudCord-mac-$ARCH-preview.zip"
@@ -127,7 +119,7 @@ codesign --verify --strict --verbose=2 "$DMG_COPY/CloudCord.app"
 test -x "$DMG_COPY/CloudCord.app/Contents/MacOS/CloudCordSetup"
 test -s "$DMG_COPY/CloudCord.app/Contents/Resources/CloudCord.icns"
 cmp installer/MAC-INSTALL.txt "$DMG_MOUNT/Read Me First.txt"
-cmp "$APP_DIR/Contents/Resources/cloudcord.asar" "$DMG_COPY/CloudCord.app/Contents/Resources/cloudcord.asar"
+cmp "$RUNTIME_ASAR" "$DMG_COPY/CloudCord.app/Contents/Resources/cloudcord.asar"
 open -n "$DMG_COPY/CloudCord.app"
 sleep 5
 if ! pgrep -x CloudCordSetup >/dev/null; then

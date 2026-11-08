@@ -22,6 +22,13 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+      - name: Check out CX desktop runtime source
+        uses: actions/checkout@v4
+        with:
+          repository: cloudcord-mod/release-hub
+          ref: a5be300816b236f40302d2c6e838fe1b8102be6d
+          path: runtime-source
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -32,11 +39,23 @@ jobs:
         with:
           go-version: 1.26.2
           cache-dependency-path: desktop/client/installer/go.sum
-      - name: Install desktop dependencies
-        working-directory: desktop/client
-        run: pnpm install --frozen-lockfile
+      - name: Build and verify the standalone CX runtime
+        working-directory: runtime-source/desktop/client
+        run: |
+          pnpm install --frozen-lockfile
+          node scripts/sync-cx-catalog.cjs --check
+          pnpm buildStandalone
+          node --input-type=module - <<'NODE'
+          import assert from "node:assert/strict";
+          import { extractFile } from "@electron/asar";
+          const archive = "dist/desktop.asar";
+          assert.equal(JSON.parse(extractFile(archive, "package.json")).main, "patcher.js");
+          const renderer = extractFile(archive, "renderer.js").toString("utf8");
+          assert.ok(renderer.includes("CX catalog"), "CX catalog missing from the desktop runtime");
+          assert.ok(renderer.includes("bypass-pin-prompt"), "The pinned CX plugin is missing");
+          NODE
       - name: Test and package native Mac preview
-        run: bash desktop/client/scripts/build-mac.sh
+        run: bash desktop/client/scripts/build-mac.sh "$GITHUB_WORKSPACE/runtime-source/desktop/client/dist/desktop.asar"
       - uses: actions/upload-artifact@v4
         with:
           name: CloudCord-Mac-${{ matrix.architecture }}-Preview

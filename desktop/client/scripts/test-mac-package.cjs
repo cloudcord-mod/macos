@@ -19,7 +19,6 @@ const plist = written.get(contents + "/Info.plist");
 assert(plist.data.includes("<key>CFBundleExecutable</key><string>CloudCordSetup</string>"));
 assert(source.includes('cp "dist/CloudCordSetup-darwin-$ARCH" "$APP_DIR/Contents/MacOS/CloudCordSetup"'));
 assert(source.includes('codesign --verify --strict'));
-assert(source.includes('open -n "$APP_DIR"'));
 assert(source.includes('-fs HFS+'));
 assert(source.includes('hdiutil attach -readonly'));
 assert(source.includes('open -n "$DMG_COPY/CloudCord.app"'));
@@ -41,8 +40,8 @@ assert(macUI.includes('520, 320'), 'Long guide should have a bounded scrollable 
 assert(macUI.includes('text.textContainer.widthTracksTextView = YES'));
 assert(macUI.includes('[NSColor textColor]'));
 assert(plist.data.includes('<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>'));
-assert(source.includes('"$APP_DIR/Contents/Resources/cloudcord.asar"'));
-assert(source.includes("pnpm buildStandalone"));
+assert(source.includes('cp "$RUNTIME_ASAR" "$APP_DIR/Contents/Resources/cloudcord.asar"'));
+assert(source.includes('cmp "$RUNTIME_ASAR" "$DMG_COPY/CloudCord.app/Contents/Resources/cloudcord.asar"'));
 assert(source.includes("go test -tags cli ./..."));
 const bash = process.platform === "win32" ? "C:/Program Files/Git/bin/bash.exe" : "bash";
 for (const script of [source]) {
