@@ -1,0 +1,143 @@
+/*
+ * Vencord, a Discord client mod
+ * Copyright (c) 2025 Vendicated and contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+import { showNotice } from "@api/Notices";
+import { hasAnyVisibleSettings, isPluginEnabled, pluginRequiresRestart, startDependenciesRecursive, startPlugin, stopPlugin } from "@api/PluginManager";
+import { Settings } from "@api/Settings";
+import { CogWheel, InfoIcon } from "@components/Icons";
+import { AddonCard } from "@components/settings/AddonCard";
+import { CLOUDCORD_FAVICON } from "@utils/cloudCordAssets";
+import { classNameFactory } from "@utils/css";
+import { Logger } from "@utils/Logger";
+import { Plugin } from "@utils/types";
+import { React, showToast, Toasts } from "@webpack/common";
+
+import { PluginMeta } from "~plugins";
+
+import { openPluginModal } from "./PluginModal";
+
+const logger = new Logger("PluginCard");
+const cl = classNameFactory("vc-plugins-");
+interface PluginCardProps extends React.HTMLProps<HTMLDivElement> {
+    plugin: Plugin;
+    disabled?: boolean;
+    onRestartNeeded(name: string, key: string): void;
+    isNew?: boolean;
+    onMouseEnter?: React.MouseEventHandler<HTMLDivElement>;
+    onMouseLeave?: React.MouseEventHandler<HTMLDivElement>;
+}
+
+export function PluginCard({ plugin, disabled, onRestartNeeded, onMouseEnter, onMouseLeave, isNew }: PluginCardProps) {
+    const settings = Settings.plugins[plugin.name];
+    const pluginMeta = PluginMeta[plugin.name];
+    const isUserPlugin = pluginMeta?.userPlugin ?? false;
+    const isCloudCordPlugin = !isUserPlugin && [
+        "src/plugins/",
+        "src/sincordplugins/",
+        "src/cloudcordplugins/"
+    ].some(prefix => pluginMeta.folderName.startsWith(prefix));
+
+    const isEnabled = () => isPluginEnabled(plugin.name);
+
+    function toggleEnabled() {
+        const wasEnabled = isEnabled();
+
+        // If we're enabling a plugin, make sure all deps are enabled recursively.
+        if (!wasEnabled) {
+            const { restartNeeded, failures } = startDependenciesRecursive(plugin);
+
+            if (failures.length) {
+                logger.error(`Failed to start dependencies for ${plugin.name}: ${failures.join(", ")}`);
+                showNotice("Failed to start dependencies: " + failures.join(", "), "Close", () => null);
+                return;
+            }
+
+            if (restartNeeded) {
+                // If any dependencies have patches, don't start the plugin yet.
+                settings.enabled = true;
+                onRestartNeeded(plugin.name, "enabled");
+                return;
+            }
+        }
+
+        // if the plugin requires a restart, don't use stopPlugin/startPlugin. Wait for restart to apply changes.
+        if (pluginRequiresRestart(plugin)) {
+            settings.enabled = !wasEnabled;
+            onRestartNeeded(plugin.name, "enabled");
+            return;
+        }
+
+        // If the plugin is enabled, but hasn't been started, then we can just toggle it off.
+        if (wasEnabled && !plugin.started) {
+            settings.enabled = !wasEnabled;
+            return;
+        }
+
+        const result = wasEnabled ? stopPlugin(plugin) : startPlugin(plugin);
+
+        if (!result) {
+            settings.enabled = false;
+
+            const msg = `Error while ${wasEnabled ? "stopping" : "starting"} plugin ${plugin.name}`;
+            showToast(msg, Toasts.Type.FAILURE, {
+                position: Toasts.Position.BOTTOM,
+            });
+
+            return;
+        }
+
+        settings.enabled = !wasEnabled;
+    }
+
+    const pluginInfo = [
+        {
+            condition: isUserPlugin,
+            src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23949cf7' d='M9 3h6v4h4v6h-4v4H9v-4H5V7h4z'/%3E%3C/svg%3E",
+            alt: "User",
+            title: "User Plugin"
+        }
+    ];
+
+    const pluginDetails = pluginInfo.find(p => p.condition);
+
+    const sourceBadge = isCloudCordPlugin ? (
+        <img src={CLOUDCORD_FAVICON} alt="CloudCord" style={{ width: 22, height: 22, display: "block", objectFit: "contain" }} />
+    ) : pluginDetails ? (
+        <img
+            src={pluginDetails.src}
+            alt={pluginDetails.alt}
+            style={{ width: 22, height: 22, display: "block", objectFit: "contain" }}
+        />
+    ) : null;
+
+    const tooltip = isCloudCordPlugin ? "CloudCord Plugin" : pluginDetails?.title || "Unknown Plugin";
+
+    return (
+        <AddonCard
+            name={plugin.name}
+            sourceBadge={sourceBadge}
+            tooltip={tooltip}
+            description={plugin.description}
+            isNew={isNew}
+            enabled={isEnabled()}
+            setEnabled={toggleEnabled}
+            disabled={disabled}
+            onMouseEnter={onMouseEnter}
+            onMouseLeave={onMouseLeave}
+            infoButton={
+                <button
+                    role="switch"
+                    onClick={() => openPluginModal(plugin, onRestartNeeded)}
+                    className={cl("info-button")}
+                >
+                    {hasAnyVisibleSettings(plugin)
+                        ? <CogWheel className={cl("info-icon")} />
+                        : <InfoIcon className={cl("info-icon")} />
+                    }
+                </button>
+            } />
+    );
+}

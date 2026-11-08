@@ -1,0 +1,66 @@
+{
+    "manifest_version": 2,
+    "minimum_chrome_version": "91",
+    "name": "CloudCord Web",
+    "description": "Your Discord, your way.",
+    "author": "CloudCord",
+    "homepage_url": "https://github.com/xohus/cloudcord",
+    "icons": {
+        "16": "icon-16.png", "32": "icon-32.png", "48": "icon-48.png", "128": "icon.png"
+    },
+    "permissions": [
+        "webRequest", "alarms", "storage",
+        "webRequestBlocking",
+        "*://*.discord.com/*",
+        "https://raw.githubusercontent.com/*", "https://getcloudcord.com/*"
+    ],
+    "content_scripts": [
+        {
+            "run_at": "document_start",
+            "matches": [
+                "*://*.discord.com/*"
+            ],
+            "js": [
+                "content.js"
+            ],
+            "all_frames": true,
+            "world": "ISOLATED"
+        },
+        {
+            "run_at": "document_start",
+            "matches": [
+                "*://*.discord.com/*"
+            ],
+            "js": [
+                "dist/CloudCord.js"
+            ],
+            "all_frames": true,
+            "world": "MAIN"
+        }
+    ],
+    "background": {
+        "scripts": [
+            "background.js", "update-check.js"
+        ]
+    },
+    "browser_action": { "default_title": "CloudCord", "default_icon": { "16": "icon-16.png", "32": "icon-32.png" } },
+    "web_accessible_resources": [
+        "dist/CloudCord.js",
+        "dist/CloudCord.css"
+    ],
+    "browser_specific_settings": {
+        "gecko": {
+            "id": "firefox@cloudcord.xohus.lol",
+            "strict_min_version": "128.0",
+            "data_collection_permissions": {
+                "required": [
+                    "none"
+                ],
+                "optional": [
+                    "authenticationInfo",
+                    "locationInfo"
+                ]
+            }
+        }
+    }
+}

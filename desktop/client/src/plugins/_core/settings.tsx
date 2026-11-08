@@ -1,0 +1,393 @@
+/*
+ * Vencord, a Discord client mod
+ * Copyright (c) 2025 Vendicated and contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+import { definePluginSettings } from "@api/Settings";
+import {
+    MainSettingsIcon,
+    InfoIcon,
+    PluginsIcon,
+    RobotIcon,
+    UserIcon
+} from "@components/Icons";
+import {
+    AddonsTab,
+    BotCordTab,
+    CloudCordDiagnosticsTab,
+    FakeProfileTab,
+    VencordTab,
+} from "@components/settings";
+import { CloudCordDeveloperControls } from "@components/settings/tabs/customization";
+import { gitHashShort } from "@shared/vencordUserAgent";
+import { Devs } from "@utils/constants";
+import { isTruthy } from "@utils/guards";
+import definePlugin, { IconProps, OptionType } from "@utils/types";
+import { waitFor } from "@webpack";
+import { React } from "@webpack/common";
+import type { ComponentType, PropsWithChildren, ReactNode } from "react";
+
+let LayoutTypes = {
+    SECTION: 1,
+    SIDEBAR_ITEM: 2,
+    PANEL: 3,
+    CATEGORY: 5,
+    CUSTOM: 19,
+};
+waitFor(["SECTION", "SIDEBAR_ITEM", "PANEL", "CUSTOM"], v => LayoutTypes = v);
+
+type SettingsLocation =
+    | "top"
+    | "aboveNitro"
+    | "belowNitro"
+    | "aboveActivity"
+    | "belowActivity"
+    | "bottom";
+
+interface SettingsLayoutNode {
+    type: number;
+    key?: string;
+    legacySearchKey?: string;
+    getLegacySearchKey?(): string;
+    useLabel?(): string;
+    useTitle?(): string;
+    buildLayout?(): SettingsLayoutNode[];
+    icon?(): ReactNode;
+    render?(): ReactNode;
+    StronglyDiscouragedCustomComponent?(): ReactNode;
+    Component?: ComponentType<{}>;
+    useSearchTerms?(): string[];
+}
+
+interface EntryOptions {
+    key: string;
+    title: string;
+    panelTitle?: string;
+    Component: ComponentType<{}>;
+    Icon: ComponentType<IconProps>;
+}
+
+interface SettingsLayoutBuilder {
+    key?: string;
+    buildLayout(): SettingsLayoutNode[];
+}
+
+export const settings = definePluginSettings({
+    settingsLocation: {
+        type: OptionType.SELECT,
+        description: "Where to put the CloudCord settings section",
+        options: [
+            { label: "At the very top", value: "top" },
+            { label: "Above the Nitro section", value: "aboveNitro", default: true },
+            { label: "Below the Nitro section", value: "belowNitro" },
+            { label: "Above Activity Settings", value: "aboveActivity" },
+            { label: "Below Activity Settings", value: "belowActivity" },
+            { label: "At the very bottom", value: "bottom" },
+        ] as { label: string; value: SettingsLocation; default?: boolean; }[]
+    },
+    includeVencordInfoWhenCopying: {
+        type: OptionType.BOOLEAN,
+        description: "Include CloudCord, Electron and Chromium versions when copying version info",
+        default: true
+    },
+    diagnosticsMode: {
+        type: OptionType.BOOLEAN,
+        description: "Show CloudCord diagnostics and interception helpers",
+        default: false
+    },
+    showCloudCordSection: {
+        type: OptionType.BOOLEAN,
+        description: "Show the full CloudCord section in Discord's settings sidebar",
+        default: true
+    },
+    showSectionHeading: {
+        type: OptionType.BOOLEAN,
+        description: "Show the CloudCord Settings heading in Discord's settings sidebar",
+        default: true
+    },
+    showBotCordTab: {
+        type: OptionType.BOOLEAN,
+        description: "Show BotCord in the CloudCord settings section",
+        default: true
+    },
+    showFakeProfileTab: {
+        type: OptionType.BOOLEAN,
+        description: "Show Fake Profile in the CloudCord settings section",
+        default: true
+    },
+    showCloudSyncTab: {
+        type: OptionType.BOOLEAN,
+        description: "Show CloudSync in the CloudCord settings section",
+        default: true
+    },
+    showPluginsTab: {
+        type: OptionType.BOOLEAN,
+        description: "Show Plugins in the CloudCord settings section",
+        default: true
+    },
+    showThemesTab: {
+        type: OptionType.BOOLEAN,
+        description: "Show Themes in the CloudCord settings section",
+        default: true
+    },
+    showBackupTab: {
+        type: OptionType.BOOLEAN,
+        description: "Show Backup & Restore in the CloudCord settings section",
+        default: true
+    },
+});
+
+export default definePlugin({
+    name: "Settings",
+    description: "Adds Settings UI and debug info",
+    authors: [Devs.Ven, Devs.Megu],
+    required: true,
+
+    settings,
+
+    patches: [
+        {
+            find: "#{intl::COPY_VERSION}",
+            replacement: [
+                {
+                    match: /\.RELEASE_CHANNEL/,
+                    replace: "$&.replace(/^./, c => c.toUpperCase())"
+                },
+                {
+                    match: /"text-xxs\/normal".{0,300}?(?=null!=(\i)&&(.{0,20}\i\.\i.{0,200}?,children:).{0,15}?("span"),({className:\i\.\i,children:\["Build Override: ",\1\.id\]\})\)\}\))/,
+                    replace: (m, _buildOverride, makeRow, component, props) => {
+                        props = props.replace(/children:\[.+\]/, "");
+                        return `${m},$self.makeInfoElements(${component},${props}).map(e=>${makeRow}e})),`;
+                    }
+                },
+                {
+                    match: /copyValue:\i\.join\(" "\)/g,
+                    replace: "$& + $self.getInfoString()"
+                }
+            ]
+        },
+        {
+            find: ".buildLayout().map",
+            replacement: {
+                match: /(\i)\.buildLayout\(\)(?=\.map)/,
+                replace: "$self.buildLayout($1)"
+            }
+        }
+    ],
+
+    buildEntry(options: EntryOptions): SettingsLayoutNode {
+        const { key, title, panelTitle = title, Component, Icon } = options;
+
+        const panel: SettingsLayoutNode = {
+            key: key + "_panel",
+            type: LayoutTypes.PANEL,
+            useTitle: () => panelTitle,
+            buildLayout: () => [{
+                type: LayoutTypes.CATEGORY,
+                key: key + "_category",
+                buildLayout: () => [{
+                    type: LayoutTypes.CUSTOM,
+                    key: key + "_custom",
+                    Component: Component,
+                    useSearchTerms: () => [title]
+                }]
+            }]
+        };
+
+        return ({
+            key,
+            type: LayoutTypes.SIDEBAR_ITEM,
+            useTitle: () => title,
+            icon: () => <Icon width={20} height={20} />,
+            buildLayout: () => [panel]
+        });
+    },
+
+    buildLayout(originalLayoutBuilder: SettingsLayoutBuilder) {
+        const layout = originalLayoutBuilder.buildLayout();
+        if (originalLayoutBuilder.key !== "$Root") return layout;
+        if (!Array.isArray(layout)) return layout;
+        if (layout.some(s => s?.key === "cloudcord_section")) return layout;
+
+        this.addControlsToDeveloperPage(layout);
+
+        const { buildEntry } = this;
+
+        if (!settings.store.showCloudCordSection) {
+            return layout;
+        }
+
+        const cloudcordEntries: SettingsLayoutNode[] = [
+            buildEntry({
+                key: "cloudcord_main",
+                title: "Overview",
+                panelTitle: "Overview",
+                Component: VencordTab,
+                Icon: InfoIcon
+            }),
+            settings.store.showBotCordTab && buildEntry({
+                key: "cloudcord_botcord",
+                title: "Botcord",
+                panelTitle: "Botcord",
+                Component: BotCordTab,
+                Icon: RobotIcon
+            }),
+            settings.store.showFakeProfileTab && buildEntry({
+                key: "cloudcord_fake_profile",
+                title: "Profile",
+                panelTitle: "Profile",
+                Component: FakeProfileTab,
+                Icon: UserIcon
+            }),
+            buildEntry({
+                key: "cloudcord_cloud_sync",
+                title: "Add-ons",
+                panelTitle: "Add-ons",
+                Component: AddonsTab,
+                Icon: PluginsIcon
+            }),
+            settings.store.diagnosticsMode === true && buildEntry({
+                key: "cloudcord_diagnostics",
+                title: "Diagnostics",
+                panelTitle: "CloudCord Diagnostics",
+                Component: CloudCordDiagnosticsTab,
+                Icon: MainSettingsIcon
+            })
+        ].filter(isTruthy);
+
+        const cloudcordSection: SettingsLayoutNode = {
+            key: "cloudcord_section",
+            type: LayoutTypes.SECTION,
+            useTitle: () => settings.store.showSectionHeading ? "CloudCord Settings" : "",
+            buildLayout: () => cloudcordEntries
+        };
+
+        const { settingsLocation } = settings.store;
+
+        const places: Record<SettingsLocation, string> = {
+            top: "user_section",
+            aboveNitro: "billing_section",
+            belowNitro: "billing_section",
+            aboveActivity: "games_and_apps_section",
+            belowActivity: "games_and_apps_section",
+            bottom: "utility_section"
+        };
+
+        const key = places[settingsLocation] ?? places.top;
+        let idx = layout.findIndex(s => typeof s?.key === "string" && s.key === key);
+
+        if (idx === -1) {
+            idx = 2;
+        } else if (settingsLocation.startsWith("below")) {
+            idx += 1;
+        }
+
+        layout.splice(idx, 0, cloudcordSection);
+
+        return layout;
+    },
+
+    addControlsToDeveloperPage(layout: SettingsLayoutNode[]) {
+        const otherSection = layout.find(node => node?.key === "utility_section");
+        if (!otherSection?.buildLayout) return;
+
+        const originalSectionBuild = otherSection.buildLayout.bind(otherSection);
+        otherSection.buildLayout = () => {
+            const entries = originalSectionBuild();
+            const developerEntry = entries.find(entry => {
+                try {
+                    return String(entry?.key || "").toLowerCase().includes("developer") || entry?.useTitle?.() === "Developer";
+                } catch {
+                    return false;
+                }
+            });
+            if (!developerEntry?.buildLayout) return entries;
+
+            const originalEntryBuild = developerEntry.buildLayout.bind(developerEntry);
+            developerEntry.buildLayout = () => {
+                const panels = originalEntryBuild();
+                const panel = panels.find(node => node?.type === LayoutTypes.PANEL && node.buildLayout);
+                if (!panel?.buildLayout) return panels;
+
+                const originalPanelBuild = panel.buildLayout.bind(panel);
+                panel.buildLayout = () => {
+                    const categories = originalPanelBuild();
+                    if (categories.some(node => node?.key === "cloudcord_developer_controls")) return categories;
+                    return [...categories, {
+                        type: LayoutTypes.CATEGORY,
+                        key: "cloudcord_developer_controls",
+                        buildLayout: () => [{
+                            type: LayoutTypes.CUSTOM,
+                            key: "cloudcord_developer_controls_custom",
+                            Component: CloudCordDeveloperControls,
+                            useSearchTerms: () => []
+                        }]
+                    }];
+                };
+                return panels;
+            };
+            return entries;
+        };
+    },
+
+    customEntries: [] as EntryOptions[],
+
+    get electronVersion() {
+        return VencordNative.native.getVersions().electron ?? window.legcord?.electron ?? null;
+    },
+
+    get chromiumVersion() {
+        try {
+            return (
+                VencordNative.native.getVersions().chrome ??
+                // @ts-expect-error userAgentData types
+                navigator.userAgentData?.brands?.find(
+                    (b: { brand: string; }) => b.brand === "Chromium" || b.brand === "Google Chrome",
+                )?.version ??
+                null
+            );
+        } catch {
+            return null;
+        }
+    },
+
+    getVersionInfo(support = true) {
+        let version = "";
+
+        if (IS_DEV) version = "Dev Build";
+        if (IS_WEB) version = "Web";
+        if (IS_VESKTOP) version = `Vesktop v${VesktopNative.app.getVersion()}`;
+        if (IS_EQUIBOP) version = `Sinbop v${VesktopNative.app.getVersion()}`;
+        if (IS_STANDALONE) version = "Standalone";
+
+        return support && version ? ` (${version})` : version;
+    },
+
+    getInfoRows() {
+        const { electronVersion, chromiumVersion, getVersionInfo } = this;
+
+        const rows = [`CloudCord ${gitHashShort}${getVersionInfo()}`];
+
+        if (electronVersion) rows.push(`Electron ${electronVersion}`);
+        if (chromiumVersion) rows.push(`Chromium ${chromiumVersion}`);
+
+        return rows;
+    },
+
+    getInfoString() {
+        if (!settings.store.includeVencordInfoWhenCopying) return "";
+        return "\n" + this.getInfoRows().join("\n");
+    },
+
+    makeInfoElements(
+        Component: ComponentType<React.PropsWithChildren>,
+        props: PropsWithChildren,
+    ) {
+        return this.getInfoRows().map((text, i) => (
+            <Component key={i} {...props}>
+                {text}
+            </Component>
+        ));
+    },
+});
