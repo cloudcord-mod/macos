@@ -26,7 +26,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: cloudcord-mod/release-hub
-          ref: 35dfcb301b536ecaa739b9c0ee3a7e180290c341
+          ref: 8f93a43ee83a07ff3f46b2aee2545b46f6ecf8f8
           path: runtime-source
           persist-credentials: false
       - uses: actions/setup-node@v4
